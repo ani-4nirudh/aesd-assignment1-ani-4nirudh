@@ -1,4 +1,10 @@
 #include "systemcalls.h"
+#include <stdlib.h>
+#include <unistd.h>
+#include <sys/wait.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <fcntl.h>
 
 /**
  * @param cmd the command to execute with system()
@@ -9,15 +15,17 @@
 */
 bool do_system(const char *cmd)
 {
-
+  int ret = system(cmd);
+  if (ret == -1) {
+    return false;
+  }
+  return true;
 /*
  * TODO  add your code here
  *  Call the system() function with the command set in the cmd
  *   and return a boolean true if the system() call completed with success
- *   or false() if it returned a failure
+ *   or false if it returned a failure
 */
-
-    return true;
 }
 
 /**
@@ -38,62 +46,139 @@ bool do_exec(int count, ...)
 {
     va_list args;
     va_start(args, count);
-    char * command[count+1];
+    char *command[count+1];
     int i;
     for(i=0; i<count; i++)
     {
         command[i] = va_arg(args, char *);
+        printf("\ncommand[%d] = %s\n", i, command[i]);
     }
     command[count] = NULL;
     // this line is to avoid a compile warning before your implementation is complete
     // and may be removed
-    command[count] = command[count];
+    // command[count] = command[count];
+    
 
-/*
- * TODO:
- *   Execute a system command by calling fork, execv(),
- *   and wait instead of system (see LSP page 161).
- *   Use the command[0] as the full path to the command to execute
- *   (first argument to execv), and use the remaining arguments
- *   as second argument to the execv() command.
- *
-*/
+    /*
+    * TODO:
+    *   Execute a system command by calling fork, execv(),
+    *   and wait instead of system (see LSP page 161).
+    *   Use the command[0] as the full path to the command to execute
+    *   (first argument to execv), and use the remaining arguments
+    *   as second argument to the execv() command.
+    *
+    */
 
-    va_end(args);
+  /* Start fork() and execv() */
+  pid_t pid;
+  pid = fork(); // Cloning the parent
+  
+  if (pid == -1) {
+    perror("fork");
+    return false;
+  }
 
-    return true;
-}
-
-/**
-* @param outputfile - The full path to the file to write with command output.
-*   This file will be closed at completion of the function call.
-* All other parameters, see do_exec above
-*/
-bool do_exec_redirect(const char *outputfile, int count, ...)
-{
-    va_list args;
-    va_start(args, count);
-    char * command[count+1];
-    int i;
-    for(i=0; i<count; i++)
-    {
-        command[i] = va_arg(args, char *);
+  // Child process
+  if (pid == 0) {
+      execv(command[0], command);
+      perror("execv");
+      
+      // Exit the child process on failure
+      exit(EXIT_FAILURE);
     }
-    command[count] = NULL;
-    // this line is to avoid a compile warning before your implementation is complete
-    // and may be removed
-    command[count] = command[count];
+ 
+  va_end(args);
 
+  // Parent process
+  int status;
+  if (waitpid(pid, &status, 0) == -1) {
+    perror("waitpid");
+    return false;
+  }
 
-/*
- * TODO
- *   Call execv, but first using https://stackoverflow.com/a/13784315/1446624 as a refernce,
- *   redirect standard out to a file specified by outputfile.
- *   The rest of the behaviour is same as do_exec()
- *
-*/
-
-    va_end(args);
-
+  if (WIFEXITED(status) && WEXITSTATUS(status) == 0) {
     return true;
+  }
+  
+  return false;
 }
+
+ /**
+ * @param outputfile - The full path to the file to write with command output.
+ *   This file will be closed at completion of the function call.
+ * All other parameters, see do_exec above
+ */
+ bool do_exec_redirect(const char *outputfile, int count, ...)
+ {
+     va_list args;
+     va_start(args, count);
+     char * command[count+1];
+     int i;
+     for(i=0; i<count; i++)
+     {
+         command[i] = va_arg(args, char *);
+     }
+     command[count] = NULL;
+     // this line is to avoid a compile warning before your implementation is complete
+     // and may be removed
+     // command[count] = command[count];
+
+
+ /*
+  * TODO
+  *   Call execv, but first using https://stackoverflow.com/a/13784315/1446624 as a refernce,
+  *   redirect standard out to a file specified by outputfile.
+  *   The rest of the behaviour is same as do_exec()
+  *
+ */
+
+  pid_t pid;
+  pid = fork();
+
+  // Check for clone process failure
+  if (pid == -1) {
+    perror("fork");
+    return false;
+  }
+
+
+  // Start the child process
+  if (pid == 0) {
+    
+    // Open the file only inside child process
+    int fd = open("testfile.txt", O_WRONLY | O_CREAT | O_SYNC | O_TRUNC, 0644);
+    if (fd == -1) {
+      perror("open");
+      exit(EXIT_FAILURE);
+    }
+
+    if (dup2(fd, 1) == -1) {
+      perror("dup2");
+      close(fd);
+      exit(EXIT_FAILURE);
+    }
+
+    // Close the file descriptor because we have already pointed stdout to the testfile.txt
+    // There was one door using open() and then we created 2 doors to that same room using dup2
+    // Therefore, close the door that we created
+    close(fd);
+
+    execv(command[0], command);
+    perror("execv");
+    exit(EXIT_FAILURE); // Kill the child process
+  }
+
+  va_end(args);
+
+  int status;
+  if (waitpid(pid, &status, 0) == -1) {
+    perror("waitpid");
+    return false;
+  }
+
+  if (WIFEXITED(status) && WEXITSTATUS(status) == 0) {
+    return true;
+  }
+
+  return false;
+ }
